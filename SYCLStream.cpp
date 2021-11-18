@@ -91,7 +91,11 @@ SYCLStream<T>::~SYCLStream()
   delete queue;
   devices.clear();
 }
-
+#ifdef FIXED_WG_SIZE
+#define WG_SIZE_ATTR cl::sycl::attribute<cl::sycl::reqd_work_group_size<FIXED_WG_SIZE>>
+#else 
+#define WG_SIZE_ATTR
+#endif
 template <class T>
 void SYCLStream<T>::copy()
 {
@@ -99,10 +103,18 @@ void SYCLStream<T>::copy()
   {
     auto ka = d_a->template get_access<access::mode::read>(cgh);
     auto kc = d_c->template get_access<access::mode::write>(cgh);
-    cgh.parallel_for<copy_kernel>(range<1>{array_size}, [=](id<1> idx)
+    #ifdef FIXED_WG_SIZE
+    const int local_size = FIXED_WG_SIZE;
+    #else
+    const int local_size = 4;
+    #endif
+    cgh.parallel_for<copy_kernel>(nd_range<1>{array_size, local_size}, WG_SIZE_ATTR([=](nd_item<1> idx)
     {
-      kc[idx] = ka[idx];
-    });
+      kc[idx.get_global_id()] = ka[idx.get_global_id()];
+#ifdef BARRIER
+      idx.barrier();
+#endif
+    }));
   });
   queue->wait();
 }
